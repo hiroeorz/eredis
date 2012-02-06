@@ -26,7 +26,12 @@
 %%
 
 start_link() ->
-    start_link("127.0.0.1", 6379, 0, "").
+    case parse_redistogo_uri() of
+        {ok, [Host, Port, Password]} ->
+            start_link(Host, Port, 0, Password);
+        {not_defined, _} ->
+            start_link("127.0.0.1", 6379, 0, "")
+    end.
 
 start_link(Host, Port) ->
     start_link(Host, Port, 0, "").
@@ -50,10 +55,17 @@ start_link(Host, Port, Database, Password, ReconnectSleep)
 %% @doc: Callback for starting from poolboy
 -spec start_link(server_args()) -> {ok, Pid::pid()} | {error, Reason::term()}.
 start_link(Args) ->
-    Host           = proplists:get_value(host, Args, "127.0.0.1"),
-    Port           = proplists:get_value(port, Args, 6379),
+    [DefHost, DefPort, DefPass] = case parse_redistogo_uri() of
+                                      {ok, ConnectInfo} -> 
+                                          ConnectInfo;
+                                      {not_defined, _} -> 
+                                          ["127.0.0.1", 6379, ""]
+                                  end,
+
+    Host           = proplists:get_value(host, Args, DefHost),
+    Port           = proplists:get_value(port, Args, DefPort),
     Database       = proplists:get_value(database, Args, 0),
-    Password       = proplists:get_value(password, Args, ""),
+    Password       = proplists:get_value(password, Args, DefPass),
     ReconnectSleep = proplists:get_value(reconnect_sleep, Args, 100),
     start_link(Host, Port, Database, Password, ReconnectSleep).
 
@@ -122,3 +134,13 @@ to_binary(X) when is_binary(X)  -> X;
 to_binary(X) when is_integer(X) -> list_to_binary(integer_to_list(X));
 to_binary(X) when is_float(X)   -> throw({cannot_store_floats, X});
 to_binary(X)                    -> term_to_binary(X).
+
+%% @doc: Get connection info from REDISTOGO_URL 
+parse_redistogo_uri() ->
+    URI = os:getenv("REDISTOGO_URL"),
+    case string:tokens(URI, ":/*@") of
+        ["redis", _UserName, Password, Host, Port] ->
+            {ok, [Host, list_to_integer(Port), Password]};
+        _->
+            {not_defined, []}
+    end.
